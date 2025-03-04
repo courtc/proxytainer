@@ -6,6 +6,7 @@ use tokio::{
 };
 use anyhow::Result;
 use log::{debug, info};
+use crate::Args;
 
 pub enum DockerMessageType {
     ContainerRequire,
@@ -36,7 +37,7 @@ struct DockerManagerService {
     poll_period: Duration,
     idle_duration: Duration,
     poke_time: Instant,
-    group: String,
+    config: Args,
     pending_replies: Vec<(DockerManagerState, oneshot::Sender<Result<()>>)>,
     pending_restart: bool,
     receiver: mpsc::Receiver<DockerMessage>,
@@ -48,7 +49,7 @@ impl DockerManagerService {
         let container_list_opts = ContainerListOpts::builder()
             .all(true)
             .filter(vec![
-                ContainerFilter::Label("proxytainer.group".into(), self.group.clone()),
+                ContainerFilter::Label("proxytainer.group".into(), self.config.group.clone()),
             ]).build();
 
         self.containers.extend(
@@ -100,12 +101,15 @@ impl DockerManagerService {
             };
             let state = match container_state.status.as_deref() {
                 Some("running") => {
-                    if let Some(health) = &container_state.health {
+                    if self.config.no_health {
+                        Running
+                    } else if let Some(health) = &container_state.health {
                         match health.status.as_deref() {
                             Some("healthy" | "none") => Running,
                             Some("starting") => Starting,
                             _ => Starting,
                         }
+
                     } else {
                         Running
                     }
@@ -254,7 +258,7 @@ pub struct DockerManager {
 }
 
 impl DockerManager {
-    pub fn new(group: String, idle: u64) -> Result<Self> {
+    pub fn new(args: Args) -> Result<Self> {
         let (send, recv) = mpsc::channel(8);
         let mut service = DockerManagerService{
             state: DockerManagerState::Starting,
@@ -265,8 +269,8 @@ impl DockerManager {
             poke_time: Instant::now(),
             containers: Vec::new(),
             poll_period: Duration::from_millis(125),
-            idle_duration: Duration::from_secs(idle),
-            group,
+            idle_duration: Duration::from_secs(args.idle),
+            config: args,
             receiver: recv,
         };
         let handle = tokio::spawn(async move {

@@ -15,7 +15,7 @@ mod iotracker;
 use iotracker::AsyncRWTracker;
 
 /// Simple proxy program to manage containers
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Port to listen on
@@ -33,6 +33,10 @@ struct Args {
     /// Container idle time (seconds)
     #[arg(long, default_value_t = 300)]
     idle: u64,
+
+    /// Disable docker health check
+    #[arg(long, default_value_t = false)]
+    no_health: bool,
 }
 
 async fn tcp_listener(docker: Arc<DockerManager>, port: u16, host: String) -> Result<()> {
@@ -86,7 +90,7 @@ async fn main() {
         .format_timestamp(None)
         .init();
 
-    let docker = DockerManager::new(args.group.clone(), args.idle).unwrap();
+    let docker = DockerManager::new(args.clone()).unwrap();
     tcp_listener(Arc::new(docker), args.port, args.host.clone()).await
         .expect("Failed to start listener");
 }
