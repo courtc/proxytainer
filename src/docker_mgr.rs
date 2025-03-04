@@ -1,12 +1,12 @@
+use crate::Args;
+use anyhow::Result;
 use docker_api::opts::{ContainerFilter, ContainerListOpts, ContainerStopOpts};
+use log::{debug, info};
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{ Duration, Instant },
+    time::{Duration, Instant},
 };
-use anyhow::Result;
-use log::{debug, info};
-use crate::Args;
 
 pub enum DockerMessageType {
     ContainerRequire,
@@ -48,16 +48,21 @@ impl DockerManagerService {
     async fn run(&mut self) {
         let container_list_opts = ContainerListOpts::builder()
             .all(true)
-            .filter(vec![
-                ContainerFilter::Label("proxytainer.group".into(), self.config.group.clone()),
-            ]).build();
+            .filter(vec![ContainerFilter::Label(
+                "proxytainer.group".into(),
+                self.config.group.clone(),
+            )])
+            .build();
 
         self.containers.extend(
-            self.docker.containers().list(&container_list_opts).await
+            self.docker
+                .containers()
+                .list(&container_list_opts)
+                .await
                 .expect("Failed to list containers")
                 .into_iter()
                 .filter_map(|container| container.id)
-                .inspect(|id| info!("Found container: {}", &id[..12]))
+                .inspect(|id| info!("Found container: {}", &id[..12])),
         );
 
         if self.containers.is_empty() {
@@ -68,7 +73,9 @@ impl DockerManagerService {
 
         self.poll_container().await;
         loop {
-            while let Ok(opt_msg) = tokio::time::timeout(self.poll_period, self.receiver.recv()).await {
+            while let Ok(opt_msg) =
+                tokio::time::timeout(self.poll_period, self.receiver.recv()).await
+            {
                 if let Some(msg) = opt_msg {
                     self.handle_message(msg).await;
                 } else {
@@ -93,7 +100,9 @@ impl DockerManagerService {
         let mut new_states = Vec::new();
         for id in &self.containers {
             let container = self.docker.containers().get(id);
-            let data = container.inspect().await
+            let data = container
+                .inspect()
+                .await
                 .expect("Failed to inspect container");
             //println!("Container state: {:?}", data);
             let Some(container_state) = &data.state else {
@@ -109,11 +118,10 @@ impl DockerManagerService {
                             Some("starting") => Starting,
                             _ => Starting,
                         }
-
                     } else {
                         Running
                     }
-                },
+                }
                 Some("restarting") => Starting,
                 _ => Idle,
             };
@@ -130,25 +138,22 @@ impl DockerManagerService {
                 (Idle, Running) => {
                     self.on_state_change(Starting);
                     self.on_state_change(state);
-                },
-                (Starting, Running | Stopping) |
-                (Stopping, Idle) |
-                (Running, Stopping) |
-                (Idle, Starting) => {
+                }
+                (Starting, Running | Stopping)
+                | (Stopping, Idle)
+                | (Running, Stopping)
+                | (Idle, Starting) => {
                     self.on_state_change(state);
-                },
+                }
                 (Stopping, Starting) => {
                     self.on_state_change(Idle);
                     self.on_state_change(state);
                 }
-                (Running, Idle) |
-                (Starting, Idle) => {
+                (Running, Idle) | (Starting, Idle) => {
                     self.on_state_change(Stopping);
                     self.on_state_change(state);
-                },
-                (Idle, Stopping) |
-                (Stopping, Running) |
-                (Running, Starting) => {},
+                }
+                (Idle, Stopping) | (Stopping, Running) | (Running, Starting) => {}
                 _ => unreachable!(),
             }
         }
@@ -172,8 +177,7 @@ impl DockerManagerService {
         self.on_state_change(DockerManagerState::Starting);
         for id in &self.containers {
             let container = self.docker.containers().get(id);
-            container.start().await
-                .expect("Failed to start container");
+            container.start().await.expect("Failed to start container");
         }
     }
 
@@ -182,7 +186,9 @@ impl DockerManagerService {
         self.on_state_change(DockerManagerState::Stopping);
         for id in &self.containers {
             let container = self.docker.containers().get(id);
-            container.stop(&ContainerStopOpts::builder().build()).await
+            container
+                .stop(&ContainerStopOpts::builder().build())
+                .await
                 .expect("Failed to stop container");
         }
     }
@@ -205,20 +211,24 @@ impl DockerManagerService {
         }
 
         match (old_state, &self.state) {
-            (_, Idle) => { },
+            (_, Idle) => {}
             (_, Starting) => {
                 self.reset_poll_period();
-            },
+            }
             (_, Running) => {
                 self.poke_time = Instant::now();
-            },
+            }
             (_, Stopping) => {
                 self.reset_poll_period();
-            },
+            }
         }
     }
 
-    fn queue_response(&mut self, reply_to: Option<oneshot::Sender<Result<()>>>, state: DockerManagerState) {
+    fn queue_response(
+        &mut self,
+        reply_to: Option<oneshot::Sender<Result<()>>>,
+        state: DockerManagerState,
+    ) {
         if let Some(reply_to) = reply_to {
             if state == self.state {
                 let _ = reply_to.send(Ok(()));
@@ -235,19 +245,19 @@ impl DockerManagerService {
             (Idle, ContainerRequire) => {
                 self.queue_response(msg.reply_to, Running);
                 self.start_container().await;
-            },
+            }
             (Starting | Running, ContainerRequire) => {
                 // Already starting/started
                 self.queue_response(msg.reply_to, Running);
-            },
+            }
             (Stopping, ContainerRequire) => {
                 self.pending_restart = true;
                 self.queue_response(msg.reply_to, Running);
-            },
+            }
             (_, ContainerPoke) => {
                 self.poke_time = Instant::now();
                 self.queue_response(msg.reply_to, self.state);
-            },
+            }
         }
     }
 }
@@ -260,7 +270,7 @@ pub struct DockerManager {
 impl DockerManager {
     pub fn new(args: Args) -> Result<Self> {
         let (send, recv) = mpsc::channel(8);
-        let mut service = DockerManagerService{
+        let mut service = DockerManagerService {
             state: DockerManagerState::Starting,
             //docker: docker_api::Docker::new("unix:///var/run/docker.sock")?,
             docker: docker_api::Docker::unix("/var/run/docker.sock"),
@@ -273,10 +283,11 @@ impl DockerManager {
             config: args,
             receiver: recv,
         };
-        let handle = tokio::spawn(async move {
-            service.run().await
-        });
-        Ok(Self { sender: send, handle })
+        let handle = tokio::spawn(async move { service.run().await });
+        Ok(Self {
+            sender: send,
+            handle,
+        })
     }
 
     pub async fn wait_healthy(&self) -> Result<()> {

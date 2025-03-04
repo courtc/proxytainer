@@ -3,10 +3,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use crate::docker_mgr::{
-    DockerMessage,
-    DockerMessageType,
-};
+use crate::docker_mgr::{DockerMessage, DockerMessageType};
 
 pub struct AsyncRWTracker<T> {
     sender: mpsc::Sender<DockerMessage>,
@@ -29,13 +26,13 @@ impl<T: AsyncRead + Unpin> AsyncRead for AsyncRWTracker<T> {
         use core::task::Poll;
         match Pin::new(&mut self.inner).poll_read(cx, buf) {
             Poll::Ready(Ok(data)) => {
-                let _ = self.sender.try_send(DockerMessage{
+                let _ = self.sender.try_send(DockerMessage {
                     message_type: DockerMessageType::ContainerPoke,
                     reply_to: None,
                 });
                 Poll::Ready(Ok(data))
-            },
-            x @ _ => x,
+            }
+            x => x,
         }
     }
 }
@@ -50,13 +47,13 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for AsyncRWTracker<T> {
         use core::task::Poll;
         match Pin::new(&mut self.inner).poll_write(cx, buf) {
             Poll::Ready(Ok(data)) => {
-                let _ = self.sender.try_send(DockerMessage{
+                let _ = self.sender.try_send(DockerMessage {
                     message_type: DockerMessageType::ContainerPoke,
                     reply_to: None,
                 });
                 Poll::Ready(Ok(data))
-            },
-            x @ _ => x,
+            }
+            x => x,
         }
     }
 
@@ -76,5 +73,3 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for AsyncRWTracker<T> {
         Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
-
-

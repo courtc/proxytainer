@@ -1,12 +1,12 @@
 #![allow(unused_variables, dead_code)]
+use anyhow::Result;
+use clap::Parser;
+use log::{debug, error};
+use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream},
     time::Duration,
 };
-use anyhow::Result;
-use clap::Parser;
-use std::sync::Arc;
-use log::{debug, error};
 
 mod docker_mgr;
 use docker_mgr::DockerManager;
@@ -42,14 +42,14 @@ struct Args {
 async fn tcp_listener(docker: Arc<DockerManager>, port: u16, host: String) -> Result<()> {
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
 
-     loop {
+    loop {
         let (mut inbound, _) = listener.accept().await?;
 
         let docker = docker.clone();
         let host = host.clone();
         tokio::spawn(async move {
             loop {
-                if !docker.wait_healthy().await.is_ok() {
+                if docker.wait_healthy().await.is_err() {
                     error!("Docker image never became healthy; exiting");
                     break;
                 };
@@ -63,15 +63,9 @@ async fn tcp_listener(docker: Arc<DockerManager>, port: u16, host: String) -> Re
 
                 debug!("Connection made, tracking...");
 
-                let mut outbound = AsyncRWTracker::new(
-                    docker.sender.clone(),
-                    outbound,
-                );
-                match tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await {
-                    Err(err) => {
-                        debug!("Error: {}", err);
-                    },
-                    _ => {},
+                let mut outbound = AsyncRWTracker::new(docker.sender.clone(), outbound);
+                if let Err(err) = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await {
+                    debug!("Error: {}", err);
                 }
                 debug!("Connection closed");
                 break;
@@ -84,13 +78,12 @@ async fn tcp_listener(docker: Arc<DockerManager>, port: u16, host: String) -> Re
 async fn main() {
     let args = Args::parse();
 
-    env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("info"),
-        )
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
 
     let docker = DockerManager::new(args.clone()).unwrap();
-    tcp_listener(Arc::new(docker), args.port, args.host.clone()).await
+    tcp_listener(Arc::new(docker), args.port, args.host.clone())
+        .await
         .expect("Failed to start listener");
 }
