@@ -5,6 +5,8 @@ use log::{debug, error};
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream},
+    select,
+    signal::unix::{SignalKind, signal},
     time::Duration,
 };
 
@@ -56,7 +58,7 @@ async fn tcp_listener(docker: Arc<DockerManager>, port: u16, host: String) -> Re
 
                 let outbound = TcpStream::connect(&host).await;
                 let Ok(outbound) = outbound else {
-                    print!("Connection failed, retrying in 2 seconds");
+                    error!("Connection failed, retrying in 2 seconds");
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
                 };
@@ -81,6 +83,28 @@ async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
+
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or("panic occurred".to_string());
+        error!("{}", msg);
+
+        std::process::exit(128 + 6); // SIGABRT
+    }));
+
+    tokio::spawn(async move {
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
+        let mut sigint = signal(SignalKind::interrupt()).unwrap();
+        select! {
+            _ = sigterm.recv() => std::process::exit(128+15),
+            _ = sigint.recv() => std::process::exit(128+2),
+        };
+    });
 
     let docker = DockerManager::new(args.clone()).unwrap();
     tcp_listener(Arc::new(docker), args.port, args.host.clone())
