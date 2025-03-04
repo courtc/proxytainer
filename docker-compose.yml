@@ -1,0 +1,21 @@
+services:
+  proxytainer:
+    container_name: proxytainer
+    build: .
+    command: --port 9090 --host localhost:9091 --group test1 --idle 30
+    environment:
+      RUST_LOG: debug
+    ports:
+      - 9090:9090
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  whoami1:
+    container_name: whoami1
+    image: containous/whoami
+    command: --port 9091 # specific to containous/whoami
+    network_mode: service:proxytainer
+    depends_on:
+      - proxytainer
+    labels:
+      - "proxytainer.group=test1"
