@@ -2,6 +2,10 @@
 name = "proxytainer"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Control containers via a transparent TCP proxy."
+repository = "https://github.com/courtc/proxytainer"
+authors = ["Courtney Cavin"]
 
 [dependencies]
 anyhow = "1.0.97"

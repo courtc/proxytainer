@@ -14,7 +14,6 @@ COPY ./src ./src
 RUN cargo install --path . --profile release
 
 FROM debian:bullseye-slim
-#FROM scratch
 
 COPY --from=build /usr/local/cargo/bin/proxytainer /usr/bin/proxytainer
 ENTRYPOINT ["proxytainer"]

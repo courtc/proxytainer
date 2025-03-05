@@ -1,6 +1,5 @@
 services:
   proxytainer:
-    container_name: proxytainer
     build: .
     command: --port 9090 --host localhost:9091 --group test1 --idle 30
     environment:
